@@ -1,0 +1,13 @@
+Training MLP with params: {'dropout_rate': 0.1}
+Using optimizer: SGD with params: {'lr': 0.01, 'momentum': 0.9}
+Using loss function: CostSensitiveLoss
+Accuracy: 0.6761133603238867, Precision: 0.17142857142857143, Recall: 0.043795620437956206, F1-score: 0.06976744186046512 MCC: -0.0653211147590333, Avg ROI: -0.00037314137079328595
+--------------------------------------------------
+
+Using optimizer: Adam with params: {'lr': 0.001}
+Using loss function: CostSensitiveLoss
+Accuracy: 0.45546558704453444, Precision: 0.28846153846153844, Recall: 0.656934306569343, F1-score: 0.40089086859688194 MCC: 0.03256191219582903, Avg ROI: 0.005810288775877774
+--------------------------------------------------
+
+Using optimizer: Adam with params: {'lr': 0.01}
+Using loss function: CostSensitiveLoss
