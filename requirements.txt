@@ -1,6 +1,5 @@
 numpy~=1.24.2
 pandas~=2.0.0
-torch~=1.13.1
 scikit-learn~=1.2.2
 matplotlib
 rtdl~=0.0.13

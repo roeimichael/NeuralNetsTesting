@@ -6,12 +6,7 @@ import time
 
 
 class CostSensitiveLoss(nn.Module):
-    def __init__(self,
-                 weight: int = 100,
-                 cost_matrix: np.ndarray = np.array([[0.3, 0.7], [0.7, 0.3]]),
-                 reduction=None
-                 ):
-
+    def __init__(self, weight, cost_matrix, reduction):
         super().__init__()
         self.cost_matrix = cost_matrix
         self.TP_weight = self.cost_matrix[1, 1]

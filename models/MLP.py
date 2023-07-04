@@ -11,25 +11,25 @@ class MLP(Module):
     def __init__(self, n_inputs, dropout_rate):
         super(MLP, self).__init__()
         # input to first hidden layer
-        self.hidden1 = Linear(n_inputs, 64)
+        self.hidden1 = Linear(n_inputs, 512)
         kaiming_uniform_(self.hidden1.weight, nonlinearity='relu')
         self.act1 = ReLU()
         self.dropout1 = Dropout(dropout_rate)
 
         # second hidden layer
-        self.hidden2 = Linear(64, 32)
+        self.hidden2 = Linear(512,256)
         kaiming_uniform_(self.hidden2.weight, nonlinearity='relu')
         self.act2 = ReLU()
         self.dropout2 = Dropout(dropout_rate)
 
         # third hidden layer
-        self.hidden3 = Linear(32, 16)
+        self.hidden3 = Linear(256, 128)
         kaiming_uniform_(self.hidden3.weight, nonlinearity='relu')
         self.act3 = ReLU()
         self.dropout3 = Dropout(dropout_rate)
 
         # fourth hidden layer and output
-        self.hidden4 = Linear(16, 1)
+        self.hidden4 = Linear(128, 1)
         xavier_uniform_(self.hidden4.weight)
         self.act4 = Sigmoid()
 

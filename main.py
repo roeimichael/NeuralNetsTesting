@@ -16,10 +16,23 @@ from models.CNN1D import CNN1D
 from models.ResNet import resnet18
 from models.MLP import MLP
 from models.LSTM import LSTM
+from models.CNNcmpl import ComplexCNN
 from sklearn.metrics import f1_score, matthews_corrcoef
 import rtdl
+from tqdm import tqdm
+import functools
 
-# Put prepare_data function here
+
+def print_function_name_decorator(func):
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs):
+        print(f"Calling function {func.__name__}")
+        return func(*args, **kwargs)
+
+    return wrapper
+
+
+@print_function_name_decorator
 def prepare_data(path_train, path_test, train_path, starting_date):
     dataset = CSVDataset(path_train, path_test, train_path, starting_date)
     x_train_tensor = torch.from_numpy(dataset.x_train).float()
@@ -30,29 +43,35 @@ def prepare_data(path_train, path_test, train_path, starting_date):
     train_dataset = TensorDataset(x_train_tensor, y_train_tensor)
     test_dataset = TensorDataset(x_test_tensor, y_test_tensor)
 
-    train_dl = DataLoader(train_dataset, batch_size=32, shuffle=True)
-    test_dl = DataLoader(test_dataset, batch_size=1024, shuffle=False)
+    train_dl = DataLoader(train_dataset, batch_size=256, shuffle=True, num_workers=2)
+    test_dl = DataLoader(test_dataset, batch_size=1024, shuffle=False, num_workers=2)
 
     return train_dl, test_dl
 
-
-def train_model(train_dl, model, criterion, optimizer):
+def train_model(train_dl, model, criterion, optimizer, device):
     for i, (inputs, targets) in enumerate(train_dl):
+        inputs, targets = inputs.to(device), targets.to(device)
         optimizer.zero_grad()
         yhat = model(inputs)
         loss = criterion(yhat, targets)
         loss.backward()
         optimizer.step()
 
-
-def evaluate_model(test_dl, model, next_day_data_path):
+def evaluate_model(test_dl, model, criterion, next_day_data_path, device):
     next_day_data = pd.read_csv(next_day_data_path)['Close Change']
     predictions, actuals = [], []
+    total_loss = 0  # Initialize total loss
 
     for inputs, targets in test_dl:
-        yhat = model(inputs).detach().numpy()
+        inputs, targets = inputs.to(device), targets.to(device)
+        yhat = model(inputs)
+        loss = criterion(yhat, targets)  # Calculate the loss for this batch
+        total_loss += loss.item()  # Accumulate the losses
+
+        yhat = yhat.detach().cpu().numpy()
         predictions.extend(yhat)
-        actuals.extend(targets.numpy().reshape(-1, 1))
+        actuals.extend(targets.cpu().numpy().reshape(-1, 1))
+
     predictions, actuals = np.vstack(predictions), np.vstack(actuals)
     opened_positions = (predictions.round() == 1).sum()
     true_positive_positions = np.sum((predictions.round().flatten() == 1) & (actuals.flatten() == 1))
@@ -60,11 +79,10 @@ def evaluate_model(test_dl, model, next_day_data_path):
     total_roi = next_day_data[predictions.round().flatten() == 1].sum()
     average_roi = total_roi / opened_positions if opened_positions > 0 else 0
 
-    print(f"Confusion matrix:\n{confusion_matrix(actuals, predictions.round())}")
-    print(f"Total daily ROI: {average_roi:.5f}")
-    print(f"Total positive positions: {positive_positions}")
+    avg_loss = total_loss / len(test_dl)  # Calculate the average loss
 
     return (
+        avg_loss,
         accuracy_score(actuals, predictions.round()),
         precision_score(actuals, predictions.round(), zero_division=0),
         recall_score(actuals, predictions.round()),
@@ -83,14 +101,16 @@ def create_save_directory(model_name):
         os.makedirs(save_directory)
     return save_directory
 
-
-def save_model(model, model_name, params, epoch, save_directory):
+def save_model(model, model_name, params, save_directory):
+    model_directory = os.path.join(save_directory, model_name)
+    if not os.path.exists(model_directory):
+        os.makedirs(model_directory)
+    params_str = "_".join(f"{k}={v}" for k, v in params.items())
+    filename = f"{model_directory}/final_model_{model_name}_{params_str}.pth"
     torch.save({
         'model_state_dict': model.state_dict(),
-        'params': params,
-        'epoch': epoch
-    }, f"{save_directory}/{model_name}_epoch_{epoch}.pth")
-
+        'params': params
+    }, filename)
 
 def load_model(model, model_name, epoch, save_directory):
     checkpoint = torch.load(f"{save_directory}/{model_name}_epoch_{epoch}.pth")
@@ -98,7 +118,11 @@ def load_model(model, model_name, epoch, save_directory):
     return model
 
 
+@print_function_name_decorator
 def main(n_epochs=100):
+    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+    print(f"Using device {device}")
+    patience = 10
     with open('./data/dates.txt', 'r') as fp:
         dates = [line.strip() for line in fp.readlines()]
     starting_date = 466
@@ -106,92 +130,91 @@ def main(n_epochs=100):
     path_test = f'./data/dates1.5/{dates[starting_date + 1]}.csv'
     train_path = './data/Targets1.5.csv'
     next_day_data_path = f'./data/dates1.5/{dates[starting_date + 2]}.csv'
-    results = pd.DataFrame(columns=["Model", "Model_Params", "Loss_Function", "Optimizer", "Optimizer_Params",
+    results = pd.DataFrame(columns=["Model", "Model_Params", "Cost_Matrix_Value", "Optimizer", "Optimizer_Params",
                                     "Accuracy", "Precision", "Recall", "F1-score", "MCC", "Avg_ROI", "TP_positions",
                                     "total_positions", "positive_positions"])
+
     skip_models = []
 
     train_dl, test_dl = prepare_data(path_train, path_test, train_path, starting_date)
     n_inputs = train_dl.dataset.tensors[0].shape[1]
 
     models = [
-        {"name": "MLP", "class": MLP, "params": {"dropout_rate": [0.1, 0.3, 0.5]}},
         {"name": "ResNet", "class": resnet18, "params": {}},
         {"name": "LSTM", "class": LSTM,
-         "params": {"hidden_dim": [64], "num_layers": [1, 2], "dropout_rate": [0.1, 0.3, 0.5]}},
-        {"name": "CNN1D", "class": CNN1D, "params": {"dropout_rate": [0.1, 0.3, 0.5]}}
+         "params": {"hidden_dim": [64, 128, 256], "num_layers": [1, 2, 3], "dropout_rate": [0.1, 0.3, 0.5]}},
+        {"name": "MLP", "class": MLP,
+         "params": {"hidden_dim": [64, 128, 256], "num_layers": [1, 2, 3], "dropout_rate": [0.1, 0.3, 0.5]}},
+        {"name": "CNN1D", "class": CNN1D, "params": {"dropout_rate": [0.1, 0.3, 0.5]}},
+        {"name": "ComplexCNN", "class": ComplexCNN, "params": {"dropout_rate": [0.1, 0.3, 0.5]}}
     ]
-    loss_functions = [
-        {"name": "CostSensitiveLoss",
-         "function": CostSensitiveLoss(weight=1000, cost_matrix=np.array([[0.3, 0.7], [0.7, 0.3]]), reduction="mean")},
-        {"name": "BCELoss", "function": BCELoss()},
-        {"name": "MSELoss", "function": MSELoss()},
-        {"name": "FocalLoss", "function": FocalLoss(alpha=0.25, gamma=2.0)},
-        {"name": "HingeEmbeddingLoss", "function": HingeEmbeddingLoss()}
+
+    cost_matrix_values = np.arange(0.1, 0.5, 0.1)
+
+    cost_sensitive_loss_functions = [
+        {
+            "name": f"CostSensitiveLoss_{cost}",
+            "function": CostSensitiveLoss(weight=100, cost_matrix=np.array([[cost, 1 - cost], [1 - cost, cost]]),reduction="mean")}
+        for cost in cost_matrix_values
     ]
     optimizers = [
-        {"name": "SGD", "class": SGD, "params": {"lr": [0.01], "momentum": [0.9]}},
         {"name": "Adam", "class": Adam, "params": {"lr": [0.001, 0.01]}},
         {"name": "RMSprop", "class": RMSprop, "params": {"lr": [0.001, 0.01]}}
     ]
     try:
-        for model_info in models:
+        for model_info in tqdm(models, desc='Processing models', unit='model'):
             model_name = model_info["name"]
+            save_directory = create_save_directory(model_name)
+
             if model_name in skip_models:
                 print(f"Skipping {model_name}...")
                 continue
 
             model_class = model_info["class"]
             model_params = model_info["params"]
-            print(model_params)
+            # print(model_params)
 
-            for params in ParameterGrid(model_params):
-                print(f"Training {model_name} with params: {params}")
+            for params in tqdm(ParameterGrid(model_params), desc='Processing params', unit='param'):
 
-                save_directory = create_save_directory(model_name)
+                for loss_function_info in tqdm(cost_sensitive_loss_functions, desc='loss_functions', unit='loss_function'):
 
-                for loss_function_info in loss_functions:
-                    loss_function_name = loss_function_info["name"]
+                    cost_matrix_value = float(loss_function_info["name"].split('_')[1])  # Extract the cost_matrix_value
                     loss_function = loss_function_info["function"]
-                    for optimizer_info in optimizers:
+
+                    for optimizer_info in tqdm(optimizers, desc='optimizers',unit='optimizer'):
+
                         optimizer_name = optimizer_info["name"]
                         optimizer_class = optimizer_info["class"]
                         optimizer_params = optimizer_info["params"]
 
                         for optimizer_p in ParameterGrid(optimizer_params):
-                            print(f"Using optimizer: {optimizer_name} with params: {optimizer_p}")
-
-                            print(f"Using loss function: {loss_function_name}")
 
                             if model_name == "MLP":
-                                model = model_class(n_inputs, params["dropout_rate"])
+                                model = model_class(n_inputs, params["dropout_rate"]).to(device)
                             elif model_name == "CNN1D":
-                                model = model_class(n_inputs, params["dropout_rate"])
+                                model = model_class(n_inputs, params["dropout_rate"]).to(device)
                             elif model_name == "ResNet":
-                                model = model_class()
+                                model = model_class().to(device)
                             elif model_name == "LSTM":
                                 model = model_class(n_inputs, params["hidden_dim"], params["num_layers"],
-                                                    params["dropout_rate"])
+                                                    params["dropout_rate"]).to(device)
 
                             criterion = loss_function
                             optimizer = optimizer_class(model.parameters(), **optimizer_p)
-
                             for epoch in range(n_epochs):
-                                train_model(train_dl, model, criterion, optimizer)
-                                if (epoch + 1) % 20 == 0:
-                                    print(f'Epoch [{epoch}] done.')
+                                if epoch % 10 == 0:
+                                    print(f"Epoch: {epoch}")
+                                train_model(train_dl, model, criterion, optimizer, device)
 
-                                if (epoch + 1) % 10 == 0:
-                                    save_model(model, model_name, params, epoch, save_directory)
-
-                            acc, precision, recall, f1, mcc, avg_roi, true_positive_positions, opened_positions, positive_positions = evaluate_model(
-                                test_dl, model, next_day_data_path)
-                            print(
-                                f"Accuracy: {acc}, Precision: {precision}, Recall: {recall}, F1-score: {f1}  MCC: {mcc}, Avg ROI: {avg_roi}")
+                            save_model(model, model_name, params, save_directory)
+                            loss, acc, precision, recall, f1, mcc, avg_roi, true_positive_positions, opened_positions, positive_positions = evaluate_model(
+                                test_dl, model, criterion, next_day_data_path, device)
+                            # print( f"Accuracy: {acc}, Precision: {precision}, Recall: {recall}, F1-score: {f1}
+                            # MCC: {mcc}, Avg ROI: {avg_roi}")
                             result = {
                                 "Model": model_name,
                                 "Model_Params": params,
-                                "Loss_Function": loss_function_name,
+                                "Cost_Matrix_Value": cost_matrix_value,
                                 "Optimizer": optimizer_name,
                                 "Optimizer_Params": optimizer_p,
                                 "Accuracy": acc,
@@ -205,11 +228,10 @@ def main(n_epochs=100):
                                 "positive_positions": positive_positions
                             }
                             results = pd.concat([results, pd.DataFrame([result])], ignore_index=True)
+                            results.to_csv("intermediate_results.csv", index=False)
+
     except KeyboardInterrupt:
         print("\nStopping the code execution...")
-        results.to_csv("intermediate_results.csv", index=False)
-        print("Results saved to intermediate_results.csv")
-
     results.to_csv("model_performance_results.csv", index=False)
 
 
