@@ -17,8 +17,10 @@ class LSTM(nn.Module):
 
         x = x.view(x.size(0), 1, 495)
 
-        h0 = torch.zeros(self.num_layers, x.size(0), self.hidden_size).requires_grad_()
-        c0 = torch.zeros(self.num_layers, x.size(0), self.hidden_size).requires_grad_()
+        device = x.device  # Get the device of the input tensor
+        h0 = torch.zeros(self.num_layers, x.size(0), self.hidden_size, device=device).requires_grad_()
+        c0 = torch.zeros(self.num_layers, x.size(0), self.hidden_size, device=device).requires_grad_()
+
         out, (hn, cn) = self.lstm(x, (h0.detach(), c0.detach()))
         out = self.dropout(out[:, -1, :])
         out = self.fc(out)

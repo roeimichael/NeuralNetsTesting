@@ -48,6 +48,7 @@ def prepare_data(path_train, path_test, train_path, starting_date):
 
     return train_dl, test_dl
 
+
 def train_model(train_dl, model, criterion, optimizer, device):
     for i, (inputs, targets) in enumerate(train_dl):
         inputs, targets = inputs.to(device), targets.to(device)
@@ -56,6 +57,7 @@ def train_model(train_dl, model, criterion, optimizer, device):
         loss = criterion(yhat, targets)
         loss.backward()
         optimizer.step()
+
 
 def evaluate_model(test_dl, model, criterion, next_day_data_path, device):
     next_day_data = pd.read_csv(next_day_data_path)['Close Change']
@@ -101,6 +103,7 @@ def create_save_directory(model_name):
         os.makedirs(save_directory)
     return save_directory
 
+
 def save_model(model, model_name, params, save_directory):
     model_directory = os.path.join(save_directory, model_name)
     if not os.path.exists(model_directory):
@@ -112,6 +115,7 @@ def save_model(model, model_name, params, save_directory):
         'params': params
     }, filename)
 
+
 def load_model(model, model_name, epoch, save_directory):
     checkpoint = torch.load(f"{save_directory}/{model_name}_epoch_{epoch}.pth")
     model.load_state_dict(checkpoint['model_state_dict'])
@@ -122,7 +126,6 @@ def load_model(model, model_name, epoch, save_directory):
 def main(n_epochs=100):
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     print(f"Using device {device}")
-    patience = 10
     with open('./data/dates.txt', 'r') as fp:
         dates = [line.strip() for line in fp.readlines()]
     starting_date = 466
@@ -142,19 +145,25 @@ def main(n_epochs=100):
     models = [
         {"name": "ResNet", "class": resnet18, "params": {}},
         {"name": "LSTM", "class": LSTM,
-         "params": {"hidden_dim": [64, 128, 256], "num_layers": [1, 2, 3], "dropout_rate": [0.1, 0.3, 0.5]}},
+         "params": {"hidden_dim": [32, 64, 128, 256], "num_layers": [2, 3, 4], "dropout_rate": [0.1, 0.3, 0.5]}},
         {"name": "MLP", "class": MLP,
-         "params": {"hidden_dim": [64, 128, 256], "num_layers": [1, 2, 3], "dropout_rate": [0.1, 0.3, 0.5]}},
-        {"name": "CNN1D", "class": CNN1D, "params": {"dropout_rate": [0.1, 0.3, 0.5]}},
-        {"name": "ComplexCNN", "class": ComplexCNN, "params": {"dropout_rate": [0.1, 0.3, 0.5]}}
+         "params": {"hidden_dim": [1024, 512, 256, 128], "dropout_rate": [0.1, 0.3, 0.5]}},
+        {"name": "CNN1D", "class": CNN1D, "params": {"hidden_dim": [64, 128, 256], "dropout_rate": [0.1, 0.3, 0.5]}},
+        {"name": "ComplexCNN", "class": ComplexCNN,
+         "params": {"hidden_dim": [32, 64, 128], "dropout_rate": [0.1, 0.3, 0.5]}}
     ]
 
-    cost_matrix_values = np.arange(0.1, 0.5, 0.1)
+    y_train = train_dl.dataset.tensors[1]
+    n_positive = y_train.sum().item()
+    n_negative = len(y_train) - n_positive
+    ratio_positive_negative = n_negative / n_positive
+    cost_matrix_values = [0.05, 0.1, 0.15, 0.2, 0.3, 0.4, ratio_positive_negative]
 
     cost_sensitive_loss_functions = [
         {
             "name": f"CostSensitiveLoss_{cost}",
-            "function": CostSensitiveLoss(weight=100, cost_matrix=np.array([[cost, 1 - cost], [1 - cost, cost]]),reduction="mean")}
+            "function": CostSensitiveLoss(weight=100, cost_matrix=np.array([[cost, 1 - cost], [1 - cost, cost]]),
+                                          reduction="mean")}
         for cost in cost_matrix_values
     ]
     optimizers = [
@@ -176,12 +185,13 @@ def main(n_epochs=100):
 
             for params in tqdm(ParameterGrid(model_params), desc='Processing params', unit='param'):
 
-                for loss_function_info in tqdm(cost_sensitive_loss_functions, desc='loss_functions', unit='loss_function'):
+                for loss_function_info in tqdm(cost_sensitive_loss_functions, desc='loss_functions',
+                                               unit='loss_function'):
 
                     cost_matrix_value = float(loss_function_info["name"].split('_')[1])  # Extract the cost_matrix_value
                     loss_function = loss_function_info["function"]
 
-                    for optimizer_info in tqdm(optimizers, desc='optimizers',unit='optimizer'):
+                    for optimizer_info in tqdm(optimizers, desc='optimizers', unit='optimizer'):
 
                         optimizer_name = optimizer_info["name"]
                         optimizer_class = optimizer_info["class"]
@@ -190,15 +200,16 @@ def main(n_epochs=100):
                         for optimizer_p in ParameterGrid(optimizer_params):
 
                             if model_name == "MLP":
-                                model = model_class(n_inputs, params["dropout_rate"]).to(device)
+                                model = model_class(n_inputs, params['hidden_dim'], params["dropout_rate"]).to(device)
                             elif model_name == "CNN1D":
-                                model = model_class(n_inputs, params["dropout_rate"]).to(device)
+                                model = model_class(n_inputs, params['hidden_dim'], params["dropout_rate"]).to(device)
                             elif model_name == "ResNet":
                                 model = model_class().to(device)
                             elif model_name == "LSTM":
                                 model = model_class(n_inputs, params["hidden_dim"], params["num_layers"],
                                                     params["dropout_rate"]).to(device)
-
+                            elif model_name == "ComplexCNN":
+                                model = model_class(n_inputs, params['hidden_dim'], params["dropout_rate"]).to(device)
                             criterion = loss_function
                             optimizer = optimizer_class(model.parameters(), **optimizer_p)
                             for epoch in range(n_epochs):
