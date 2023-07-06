@@ -28,19 +28,19 @@ class BasicBlock(nn.Module):
 
 
 class ResNet(nn.Module):
-    def __init__(self, block, num_blocks, num_classes):
+    def __init__(self, hidden_size, num_blocks, num_classes):
         super(ResNet, self).__init__()
-        self.in_channels = 64
+        self.in_channels = hidden_size
 
-        self.conv1 = nn.Conv1d(1, 64, kernel_size=3, stride=1, padding=1, bias=False)
-        self.bn1 = nn.BatchNorm1d(64)
+        self.conv1 = nn.Conv1d(1, hidden_size, kernel_size=3, stride=1, padding=1, bias=False)
+        self.bn1 = nn.BatchNorm1d(hidden_size)
         self.relu = nn.ReLU(inplace=True)
-        self.layer1 = self._make_layer(block, 64, num_blocks[0], stride=1)
-        self.layer2 = self._make_layer(block, 128, num_blocks[1], stride=2)
-        self.layer3 = self._make_layer(block, 256, num_blocks[2], stride=2)
-        self.layer4 = self._make_layer(block, 512, num_blocks[3], stride=2)
+        self.layer1 = self._make_layer(BasicBlock, hidden_size, num_blocks[0], stride=1)
+        self.layer2 = self._make_layer(BasicBlock, hidden_size*2, num_blocks[1], stride=2)
+        self.layer3 = self._make_layer(BasicBlock, hidden_size*4, num_blocks[2], stride=2)
+        self.layer4 = self._make_layer(BasicBlock, hidden_size*8, num_blocks[3], stride=2)
         self.avg_pool = nn.AdaptiveAvgPool1d(1)
-        self.fc = nn.Linear(512, num_classes)
+        self.fc = nn.Linear(hidden_size*8, num_classes)
 
     def _make_layer(self, block, out_channels, num_blocks, stride):
         strides = [stride] + [1] * (num_blocks - 1)
@@ -63,7 +63,6 @@ class ResNet(nn.Module):
         return out
 
 
-def resnet18(num_classes=1):
-    return ResNet(BasicBlock, [2, 2, 2, 2], num_classes)
+
 
 

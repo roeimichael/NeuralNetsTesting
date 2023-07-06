@@ -13,7 +13,7 @@ from lossfunctions.loss_utils import CostSensitiveLoss
 from lossfunctions.focal import FocalLoss
 from CSVDataset import CSVDataset
 from models.CNN1D import CNN1D
-from models.ResNet import resnet18
+from models.ResNet import ResNet
 from models.MLP import MLP
 from models.LSTM import LSTM
 from models.CNNcmpl import ComplexCNN
@@ -21,6 +21,7 @@ from sklearn.metrics import f1_score, matthews_corrcoef
 import rtdl
 from tqdm import tqdm
 import functools
+import multiprocessing
 
 
 def print_function_name_decorator(func):
@@ -43,8 +44,9 @@ def prepare_data(path_train, path_test, train_path, starting_date):
     train_dataset = TensorDataset(x_train_tensor, y_train_tensor)
     test_dataset = TensorDataset(x_test_tensor, y_test_tensor)
 
-    train_dl = DataLoader(train_dataset, batch_size=256, shuffle=True, num_workers=2)
-    test_dl = DataLoader(test_dataset, batch_size=1024, shuffle=False, num_workers=2)
+    num_workers = multiprocessing.cpu_count()
+    train_dl = DataLoader(train_dataset, batch_size=256, shuffle=True, num_workers=num_workers)
+    test_dl = DataLoader(test_dataset, batch_size=1024, shuffle=False, num_workers=num_workers)
 
     return train_dl, test_dl
 
@@ -143,21 +145,21 @@ def main(n_epochs=100):
     n_inputs = train_dl.dataset.tensors[0].shape[1]
 
     models = [
-        {"name": "ResNet", "class": resnet18, "params": {}},
+        {"name": "ResNet", "class": ResNet, "params": {"hidden_dim": [32, 64, 128]}},
         {"name": "LSTM", "class": LSTM,
-         "params": {"hidden_dim": [32, 64, 128, 256], "num_layers": [2, 3, 4], "dropout_rate": [0.1, 0.3, 0.5]}},
+         "params": {"hidden_dim": [32, 64, 128, 256, 512], "num_layers": [2, 3, 4], "dropout_rate": [0.1, 0.3, 0.5]}},
         {"name": "MLP", "class": MLP,
-         "params": {"hidden_dim": [1024, 512, 256, 128], "dropout_rate": [0.1, 0.3, 0.5]}},
-        {"name": "CNN1D", "class": CNN1D, "params": {"hidden_dim": [64, 128, 256], "dropout_rate": [0.1, 0.3, 0.5]}},
-        {"name": "ComplexCNN", "class": ComplexCNN,
-         "params": {"hidden_dim": [32, 64, 128], "dropout_rate": [0.1, 0.3, 0.5]}}
+         "params": {"hidden_dim": [512, 256, 128, 64, 32], "dropout_rate": [0.1, 0.3, 0.5]}},
+        # {"name": "CNN1D", "class": CNN1D, "params": {"hidden_dim": [64, 128, 256], "dropout_rate": [0.1, 0.3, 0.5]}},
+        # {"name": "ComplexCNN", "class": ComplexCNN,
+        #  "params": {"hidden_dim": [32, 64, 128], "dropout_rate": [0.1, 0.3, 0.5]}}
     ]
 
     y_train = train_dl.dataset.tensors[1]
     n_positive = y_train.sum().item()
     n_negative = len(y_train) - n_positive
-    ratio_positive_negative = n_negative / n_positive
-    cost_matrix_values = [0.05, 0.1, 0.15, 0.2, 0.3, 0.4, ratio_positive_negative]
+    ratio_positive_negative = n_positive / n_negative
+    cost_matrix_values = [0.05, 0.1, 0.15, 0.2, 0.3, ratio_positive_negative]
 
     cost_sensitive_loss_functions = [
         {
@@ -167,8 +169,8 @@ def main(n_epochs=100):
         for cost in cost_matrix_values
     ]
     optimizers = [
-        {"name": "Adam", "class": Adam, "params": {"lr": [0.001, 0.01]}},
-        {"name": "RMSprop", "class": RMSprop, "params": {"lr": [0.001, 0.01]}}
+        {"name": "Adam", "class": Adam, "params": {"lr": [0.001, 0.0001, 0.01]}},
+        {"name": "RMSprop", "class": RMSprop, "params": {"lr": [0.001, 0.0001, 0.01]}}
     ]
     try:
         for model_info in tqdm(models, desc='Processing models', unit='model'):
@@ -204,7 +206,7 @@ def main(n_epochs=100):
                             elif model_name == "CNN1D":
                                 model = model_class(n_inputs, params['hidden_dim'], params["dropout_rate"]).to(device)
                             elif model_name == "ResNet":
-                                model = model_class().to(device)
+                                model = model_class(params['hidden_dim'], [2, 2, 2, 2], 1).to(device)
                             elif model_name == "LSTM":
                                 model = model_class(n_inputs, params["hidden_dim"], params["num_layers"],
                                                     params["dropout_rate"]).to(device)
@@ -239,11 +241,11 @@ def main(n_epochs=100):
                                 "positive_positions": positive_positions
                             }
                             results = pd.concat([results, pd.DataFrame([result])], ignore_index=True)
-                            results.to_csv("intermediate_results.csv", index=False)
+                            results.to_csv("results.csv", index=False)
 
     except KeyboardInterrupt:
         print("\nStopping the code execution...")
-    results.to_csv("model_performance_results.csv", index=False)
+    results.to_csv("results.csv", index=False)
 
 
 if __name__ == "__main__":
