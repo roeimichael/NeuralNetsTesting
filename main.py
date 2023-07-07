@@ -2,28 +2,28 @@ import pandas as pd
 import numpy as np
 import os
 import torch
-from sklearn.metrics import accuracy_score
 from torch.optim import SGD, Adam, RMSprop
-from torch.nn import HingeEmbeddingLoss, BCELoss, MSELoss
 from torch.utils.data import DataLoader, TensorDataset
-from sklearn.metrics import precision_score, recall_score
-from sklearn.metrics import confusion_matrix
 from sklearn.model_selection import ParameterGrid
 from Model_Config import ModelConfig
 from lossfunctions.loss_utils import CostSensitiveLoss
-from lossfunctions.focal import FocalLoss
 from CSVDataset import CSVDataset
-from models.CNN1D import CNN1D
 from models.ResNet import ResNet
 from models.MLP import MLP
 from models.LSTM import LSTM
+import functools
+import multiprocessing
+from multiprocessing import Pool
+from sklearn.metrics import accuracy_score
+from torch.nn import HingeEmbeddingLoss, BCELoss, MSELoss
 from models.CNNcmpl import ComplexCNN
 from sklearn.metrics import f1_score, matthews_corrcoef
 import rtdl
 from tqdm import tqdm
-import functools
-import multiprocessing
-from multiprocessing import Pool
+from models.CNN1D import CNN1D
+from lossfunctions.focal import FocalLoss
+from sklearn.metrics import precision_score, recall_score
+from sklearn.metrics import confusion_matrix
 
 
 def print_function_name_decorator(func):
@@ -47,8 +47,8 @@ def prepare_data(path_train, path_test, train_path, starting_date):
     test_dataset = TensorDataset(x_test_tensor, y_test_tensor)
 
     num_workers = multiprocessing.cpu_count()
-    train_dl = DataLoader(train_dataset, batch_size=256, shuffle=True, num_workers=0)
-    test_dl = DataLoader(test_dataset, batch_size=1024, shuffle=False, num_workers=0)
+    train_dl = DataLoader(train_dataset, batch_size=64, shuffle=True, num_workers=0)
+    test_dl = DataLoader(test_dataset, batch_size=64, shuffle=False, num_workers=0)
 
     return train_dl, test_dl
 
@@ -59,79 +59,6 @@ def create_save_directory(model_name):
         os.makedirs(save_directory)
     return save_directory
 
-
-# def train_model(train_dl, model, criterion, optimizer, device):
-#     for i, (inputs, targets) in enumerate(train_dl):
-#         inputs, targets = inputs.to(device), targets.to(device)
-#         optimizer.zero_grad()
-#         yhat = model(inputs)
-#         loss = criterion(yhat, targets)
-#         loss.backward()
-#         optimizer.step()
-#
-#
-# def evaluate_model(test_dl, model, criterion, next_day_data_path, device):
-#     next_day_data = pd.read_csv(next_day_data_path)['Close Change']
-#     predictions, actuals = [], []
-#     total_loss = 0  # Initialize total loss
-#
-#     for inputs, targets in test_dl:
-#         inputs, targets = inputs.to(device), targets.to(device)
-#         yhat = model(inputs)
-#         loss = criterion(yhat, targets)  # Calculate the loss for this batch
-#         total_loss += loss.item()  # Accumulate the losses
-#
-#         yhat = yhat.detach().cpu().numpy()
-#         predictions.extend(yhat)
-#         actuals.extend(targets.cpu().numpy().reshape(-1, 1))
-#
-#     predictions, actuals = np.vstack(predictions), np.vstack(actuals)
-#     opened_positions = (predictions.round() == 1).sum()
-#     true_positive_positions = np.sum((predictions.round().flatten() == 1) & (actuals.flatten() == 1))
-#     positive_positions = (next_day_data[predictions.round().flatten() == 1] > 0).sum()
-#     total_roi = next_day_data[predictions.round().flatten() == 1].sum()
-#     average_roi = total_roi / opened_positions if opened_positions > 0 else 0
-#
-#     avg_loss = total_loss / len(test_dl)  # Calculate the average loss
-#
-#     return (
-#         avg_loss,
-#         accuracy_score(actuals, predictions.round()),
-#         precision_score(actuals, predictions.round(), zero_division=0),
-#         recall_score(actuals, predictions.round()),
-#         f1_score(actuals, predictions.round(), zero_division=0),
-#         matthews_corrcoef(actuals, predictions.round(), sample_weight=None),
-#         average_roi,
-#         true_positive_positions,
-#         opened_positions,
-#         positive_positions
-#     )
-#
-#
-# def create_save_directory(model_name):
-#     save_directory = f"./saved_models/{model_name}"
-#     if not os.path.exists(save_directory):
-#         os.makedirs(save_directory)
-#     return save_directory
-#
-#
-# def save_model(model, model_name, params, save_directory):
-#     model_directory = os.path.join(save_directory, model_name)
-#     if not os.path.exists(model_directory):
-#         os.makedirs(model_directory)
-#     params_str = "_".join(f"{k}={v}" for k, v in params.items())
-#     filename = f"{model_directory}/final_model_{model_name}_{params_str}.pth"
-#     torch.save({
-#         'model_state_dict': model.state_dict(),
-#         'params': params
-#     }, filename)
-#
-#
-# def load_model(model, model_name, epoch, save_directory):
-#     checkpoint = torch.load(f"{save_directory}/{model_name}_epoch_{epoch}.pth")
-#     model.load_state_dict(checkpoint['model_state_dict'])
-#     return model
-#
 
 def create_model_configs(models, skip_models, cost_sensitive_loss_functions, optimizers,
                          train_dl, test_dl, n_epochs, next_day_data_path, device):
@@ -214,12 +141,91 @@ def main(n_epochs=100):
         return
 
     with Pool() as p:
-        model_results = p.map(run_model, model_configs)
+        for model_result in p.imap_unordered(run_model, model_configs):
+            model_result_df = pd.DataFrame(model_result)
+            with open("final_results.csv", 'a') as f:
+                model_result_df.to_csv(f, header=f.tell() == 0, index=False)
 
-    results = pd.concat([pd.DataFrame(result) for result in model_results], ignore_index=True)
-    results.to_csv("lastafinadtosihgfaresults.csv", index=False)
+
+def run_model(config):
+    return config.run_model()
 
 
+if __name__ == "__main__":
+    main()
+
+# def train_model(train_dl, model, criterion, optimizer, device):
+#     for i, (inputs, targets) in enumerate(train_dl):
+#         inputs, targets = inputs.to(device), targets.to(device)
+#         optimizer.zero_grad()
+#         yhat = model(inputs)
+#         loss = criterion(yhat, targets)
+#         loss.backward()
+#         optimizer.step()
+#
+#
+# def evaluate_model(test_dl, model, criterion, next_day_data_path, device):
+#     next_day_data = pd.read_csv(next_day_data_path)['Close Change']
+#     predictions, actuals = [], []
+#     total_loss = 0  # Initialize total loss
+#
+#     for inputs, targets in test_dl:
+#         inputs, targets = inputs.to(device), targets.to(device)
+#         yhat = model(inputs)
+#         loss = criterion(yhat, targets)  # Calculate the loss for this batch
+#         total_loss += loss.item()  # Accumulate the losses
+#
+#         yhat = yhat.detach().cpu().numpy()
+#         predictions.extend(yhat)
+#         actuals.extend(targets.cpu().numpy().reshape(-1, 1))
+#
+#     predictions, actuals = np.vstack(predictions), np.vstack(actuals)
+#     opened_positions = (predictions.round() == 1).sum()
+#     true_positive_positions = np.sum((predictions.round().flatten() == 1) & (actuals.flatten() == 1))
+#     positive_positions = (next_day_data[predictions.round().flatten() == 1] > 0).sum()
+#     total_roi = next_day_data[predictions.round().flatten() == 1].sum()
+#     average_roi = total_roi / opened_positions if opened_positions > 0 else 0
+#
+#     avg_loss = total_loss / len(test_dl)  # Calculate the average loss
+#
+#     return (
+#         avg_loss,
+#         accuracy_score(actuals, predictions.round()),
+#         precision_score(actuals, predictions.round(), zero_division=0),
+#         recall_score(actuals, predictions.round()),
+#         f1_score(actuals, predictions.round(), zero_division=0),
+#         matthews_corrcoef(actuals, predictions.round(), sample_weight=None),
+#         average_roi,
+#         true_positive_positions,
+#         opened_positions,
+#         positive_positions
+#     )
+#
+#
+# def create_save_directory(model_name):
+#     save_directory = f"./saved_models/{model_name}"
+#     if not os.path.exists(save_directory):
+#         os.makedirs(save_directory)
+#     return save_directory
+#
+#
+# def save_model(model, model_name, params, save_directory):
+#     model_directory = os.path.join(save_directory, model_name)
+#     if not os.path.exists(model_directory):
+#         os.makedirs(model_directory)
+#     params_str = "_".join(f"{k}={v}" for k, v in params.items())
+#     filename = f"{model_directory}/final_model_{model_name}_{params_str}.pth"
+#     torch.save({
+#         'model_state_dict': model.state_dict(),
+#         'params': params
+#     }, filename)
+#
+#
+# def load_model(model, model_name, epoch, save_directory):
+#     checkpoint = torch.load(f"{save_directory}/{model_name}_epoch_{epoch}.pth")
+#     model.load_state_dict(checkpoint['model_state_dict'])
+#     return model
+#
 # @print_function_name_decorator
 # def main(n_epochs=100):
 #     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
@@ -343,9 +349,3 @@ def main(n_epochs=100):
 #         print("\nStopping the code execution...")
 #     results.to_csv("results.csv", index=False)
 #
-def run_model(config):
-    return config.run_model()
-
-
-if __name__ == "__main__":
-    main()
