@@ -8,7 +8,7 @@ import time
 class CostSensitiveLoss(nn.Module):
     def __init__(self, weight, cost_matrix, reduction):
         super().__init__()
-        self.cost_matrix
+        self.cost_matrix = cost_matrix
         self.TP_weight = self.cost_matrix[1, 1]
         self.TN_weight = self.cost_matrix[0, 0]
         self.FP_weight = self.cost_matrix[0, 1]

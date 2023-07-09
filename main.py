@@ -118,20 +118,19 @@ def main(n_epochs=100):
     n_positive = y_train.sum().item()
     n_negative = len(y_train) - n_positive
     ratio_positive_negative = n_positive / n_negative
-    cost_matrix_values = [0.05, 0.1, 0.15, 0.2, 0.3, ratio_positive_negative]
+    cost_matrix_values = [0.1, 0.2, 0.3, 0.4, ratio_positive_negative]
 
     cost_sensitive_loss_functions = [
         {
             "name": f"CostSensitiveLoss_{cost}",
-            "function": CostSensitiveLoss(weight=100, cost_matrix=np.array([[cost, 1 - cost], [1 - cost, cost]]), reduction="mean")}
+            "function": CostSensitiveLoss(weight=100, cost_matrix=np.array([[cost, 1 - cost], [1 - cost, cost]]),
+                                          reduction="mean")}
         for cost in cost_matrix_values
     ]
     optimizers = [
-        {"name": "Adam", "class": Adam, "params": {"lr": [0.001, 0.0001, 0.01]}},
-        {"name": "RMSprop", "class": RMSprop, "params": {"lr": [0.001, 0.0001, 0.01]}}
+        {"name": "Adam", "class": Adam, "params": {"lr": [0.001, 0.0001, 0.00001]}},
+        {"name": "RMSprop", "class": RMSprop, "params": {"lr": [0.001, 0.0001, 0.00001]}}
     ]
-    model_configs = []
-
     try:
         model_configs = create_model_configs(models, skip_models, cost_sensitive_loss_functions, optimizers,
                                              train_dl, test_dl, n_epochs, next_day_data_path, device)
