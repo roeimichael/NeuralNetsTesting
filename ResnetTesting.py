@@ -1,24 +1,10 @@
 import pandas as pd
-import numpy as np
-import os
-import torch.nn as nn  # <-- Added this import
+import torch.nn as nn
 import torch
-from sklearn.metrics import accuracy_score
-from torch.optim import SGD, Adam, RMSprop
-from torch.nn import HingeEmbeddingLoss, BCELoss, MSELoss
 from torch.utils.data import DataLoader, TensorDataset
-from sklearn.metrics import precision_score, recall_score
-from sklearn.metrics import confusion_matrix
-from sklearn.model_selection import ParameterGrid
-from lossfunctions.loss_utils import CostSensitiveLoss
-from lossfunctions.focal import FocalLoss
 from CSVDataset import CSVDataset
-from models.ResNet import ResNet
-from sklearn.metrics import f1_score, matthews_corrcoef
-from tqdm import tqdm
 from torchvision.models import resnet18
 import torch.optim as optim
-import torch.nn.functional as F
 
 
 def prepare_data(path_train, path_test, train_path, starting_date):

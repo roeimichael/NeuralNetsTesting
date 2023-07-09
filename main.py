@@ -123,8 +123,7 @@ def main(n_epochs=100):
     cost_sensitive_loss_functions = [
         {
             "name": f"CostSensitiveLoss_{cost}",
-            "function": CostSensitiveLoss(weight=100, cost_matrix=np.array([[cost, 1 - cost], [1 - cost, cost]]),
-                                          reduction="mean")}
+            "function": CostSensitiveLoss(weight=100, cost_matrix=np.array([[cost, 1 - cost], [1 - cost, cost]]), reduction="mean")}
         for cost in cost_matrix_values
     ]
     optimizers = [
