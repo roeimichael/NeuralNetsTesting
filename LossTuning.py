@@ -173,7 +173,7 @@ def main(n_epochs=50):
 
             # Ensure the cost is within valid bounds
             cost = max(0.0, min(1.0, cost))
-
+            print(f"Number of positive predictions: {positive_positions}")
             print(f"Updated cost value: {cost}")
 
         # Adding final results
