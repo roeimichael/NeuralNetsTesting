@@ -116,8 +116,14 @@ def load_model(model, model_name, epoch, save_directory):
 
 @print_function_name_decorator
 def main(n_epochs=50):
-    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-    print(f"Using device {device}")
+    if torch.cuda.is_available():
+        device = torch.cuda.current_device()
+        gpu_properties = torch.cuda.get_device_properties(device)
+        print("GPU Name:", gpu_properties.name)
+        print("GPU Capability:", gpu_properties.major, gpu_properties.minor)
+        print("Total Memory (GB):", gpu_properties.total_memory / 1e9)
+    else:
+        print("CUDA is not available on this system.")
     with open('./data/dates.txt', 'r') as fp:
         dates = [line.strip() for line in fp.readlines()]
     starting_date = 466
@@ -126,8 +132,6 @@ def main(n_epochs=50):
     train_path = './data/Targets1.5.csv'
     next_day_data_path = f'./data/dates1.5/{dates[starting_date + 2]}.csv'
     train_dl, test_dl = prepare_data(path_train, path_test, train_path, starting_date)
-    tolerance = 0.001 # Tolerance for change in cost value to break the loop
-
     initial_cost_value = 0.5
     cost = initial_cost_value
 
@@ -140,7 +144,6 @@ def main(n_epochs=50):
 
         # Loop until the model reaches the desired number of positive predictions
         while True:
-
             # Defining the loss function with the current cost value
             loss_function = CostSensitiveLoss(weight=100,
                                               cost_matrix=np.array([[cost, 1 - cost], [1 - cost, cost]]),
@@ -169,22 +172,9 @@ def main(n_epochs=50):
                 break
 
             # Ensure the cost is within valid bounds
-            previous_cost = cost  # Store the previous cost value for comparison
-
-            # Adjusting the cost value based on the number of positive predictions
-            deviation = (positive_positions - target_positive_predictions) / target_positive_predictions
-            cost += deviation * 0.01  # Adjust the cost proportionally to the deviation from the target
-
-            # Ensure the cost is within valid bounds
             cost = max(0.0, min(1.0, cost))
 
-            print(f"Number of positive predictions: {positive_positions}")
             print(f"Updated cost value: {cost}")
-
-            # Break the loop if the change in cost is less than the tolerance
-            if abs(cost - previous_cost) < tolerance:
-                print("Convergence reached, stopping training.")
-                break
 
         # Adding final results
         loss, acc, precision, recall, f1, mcc, avg_roi, true_positive_positions, opened_positions, positive_positions = evaluate_model(
