@@ -18,8 +18,8 @@ class CostSensitiveLoss(nn.Module):
 
     def forward(self, y_pred, y_true):
         epsilon = 1e-8
-        TP = -1 * (0 + y_true) * (torch.log(1 + ((0 + y_pred) - 1) * (
-                1 - torch.tanh(self.weight * (torch.max(y_pred, 1 - y_pred) - y_pred))) + epsilon))
+        TP = -1 * (0 + y_true) * (torch.log(1 + ((0 + y_pred) - 1) * (1 - torch.tanh(self.weight * (torch.max(y_pred, 1 - y_pred) - y_pred))) + epsilon))
+
         FP = -1 * (1 - y_true) * (torch.log(1 + ((1 - y_pred) - 1) * (
                 1 - torch.tanh(self.weight * (torch.max(y_pred, 1 - y_pred) - y_pred))) + epsilon))
         TN = -1 * (1 - y_true) * (torch.log(1 + ((1 - y_pred) - 1) * (
