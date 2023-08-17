@@ -13,6 +13,7 @@ from sklearn.metrics import accuracy_score
 from sklearn.metrics import f1_score, matthews_corrcoef
 from tqdm import tqdm
 from sklearn.metrics import precision_score, recall_score
+import torchvision.models as models
 
 
 def print_function_name_decorator(func):
@@ -34,7 +35,6 @@ def prepare_data(path_train, path_test, train_path, starting_date):
     train_dataset = TensorDataset(x_train_tensor, y_train_tensor)
     test_dataset = TensorDataset(x_test_tensor, y_test_tensor)
 
-    num_workers = multiprocessing.cpu_count()
     train_dl = DataLoader(train_dataset, batch_size=64, shuffle=True, num_workers=0)
     test_dl = DataLoader(test_dataset, batch_size=64, shuffle=False, num_workers=0)
 
@@ -117,13 +117,18 @@ def load_model(model, model_name, epoch, save_directory):
 @print_function_name_decorator
 def main(n_epochs=50):
     if torch.cuda.is_available():
-        device = torch.cuda.current_device()
-        gpu_properties = torch.cuda.get_device_properties(device)
-        print("GPU Name:", gpu_properties.name)
-        print("GPU Capability:", gpu_properties.major, gpu_properties.minor)
-        print("Total Memory (GB):", gpu_properties.total_memory / 1e9)
+        num_gpus = torch.cuda.device_count()
+        print(f"Number of GPUs Available: {num_gpus}")
+        for gpu_id in range(num_gpus):
+            gpu_name = torch.cuda.get_device_name(gpu_id)
+            print(f"GPU {gpu_id}: {gpu_name}")
+
+        device = torch.device("cuda:0")
     else:
-        print("CUDA is not available on this system.")
+        print("No GPUs available, using the CPU instead.")
+        device = torch.device("cpu")
+    print(f"Current device in use: {device}")
+
     with open('./data/dates.txt', 'r') as fp:
         dates = [line.strip() for line in fp.readlines()]
     starting_date = 466
@@ -139,14 +144,17 @@ def main(n_epochs=50):
                                     "Avg_ROI", "TP_positions", "total_positions", "positive_positions"])
 
     try:
-        model = ResNet(64, [2, 2, 2, 2], 1).to(device)
+        model = ResNet(128, [2, 2, 2, 2], 1).to(device)
+        if torch.cuda.device_count() > 1:
+            print("Using multiple GPUs")
+            model = torch.nn.DataParallel(model)
         optimizer = Adam(model.parameters(), lr=0.0001)
 
         # Loop until the model reaches the desired number of positive predictions
         while True:
             # Defining the loss function with the current cost value
             loss_function = CostSensitiveLoss(weight=100,
-                                              cost_matrix=np.array([[cost, 1 - cost], [1 - cost, cost]]),
+                                              cost_matrix=np.array([[1 - cost, cost], [cost, 1 - cost]]),
                                               reduction="mean")
 
             # Training the model
@@ -160,18 +168,14 @@ def main(n_epochs=50):
                 test_dl, model, loss_function, next_day_data_path, device)
 
             # Adjusting the cost value based on the number of positive predictions
-            target_positive_predictions = 20
-            if positive_positions > target_positive_predictions:
-                # If positive predictions are above 20, increase the cost
+            target_positive_predictions = 25
+            if positive_positions > target_positive_predictions-3:
                 cost += 0.01
-            elif positive_positions < target_positive_predictions:
-                # If positive predictions are below 20, decrease the cost
+            elif positive_positions < target_positive_predictions+3:
                 cost -= 0.01
             else:
-                # If positive predictions are exactly 20, stop the loop
                 break
 
-            # Ensure the cost is within valid bounds
             cost = max(0.0, min(1.0, cost))
             print(f"Number of positive predictions: {positive_positions}")
             print(f"Updated cost value: {cost}")
@@ -197,6 +201,7 @@ def main(n_epochs=50):
     except KeyboardInterrupt:
         print("\nStopping the code execution...")
     results.to_csv("results.csv", index=False)
+
 
 if __name__ == "__main__":
     main()
