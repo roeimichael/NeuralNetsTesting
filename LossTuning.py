@@ -15,6 +15,7 @@ from tqdm import tqdm
 from sklearn.metrics import precision_score, recall_score
 import torchvision.models as models
 
+
 def print_function_name_decorator(func):
     @functools.wraps(func)
     def wrapper(*args, **kwargs):
@@ -112,6 +113,27 @@ def load_model(model, model_name, epoch, save_directory):
     model.load_state_dict(checkpoint['model_state_dict'])
     return model
 
+def generate_model_name(base_name, params):
+    """
+    Generate a unique model name based on the hyperparameters.
+    """
+    params_str = "_".join(f"{k}={v}" for k, v in params.items())
+    return f"{base_name}_{params_str}"
+
+def adjust_cost(positive_positions, target=25, delta=2, step=0.01, lower_bound=0.0, upper_bound=1.0):
+    """Adjust the cost based on the number of positive predictions."""
+
+    # Adjust cost based on target and positive positions
+    if positive_positions > target + delta:
+        adjustment = step
+    elif positive_positions < target - delta:
+        adjustment = -step
+    else:
+        return None
+
+    # Ensure cost stays within bounds and has only two decimal points
+    return round(max(lower_bound, min(upper_bound, adjustment)), 2)
+
 
 @print_function_name_decorator
 def main(n_epochs=200):
@@ -139,8 +161,10 @@ def main(n_epochs=200):
     initial_cost_value = 0.5
     cost = initial_cost_value
 
-    results = pd.DataFrame(columns=["Cost_Matrix_Value", "Accuracy", "Precision", "Recall", "F1-score", "MCC",
-                                    "Avg_ROI", "TP_positions", "total_positions", "positive_positions"])
+    results = pd.DataFrame(
+        columns=["Hidden_Size", "Num_Blocks", "Cost_Matrix_Value", "Accuracy", "Precision", "Recall", "F1-score", "MCC",
+                 "Avg_ROI", "TP_positions", "total_positions", "positive_positions"])
+
     hyperparams = [
         {"hidden_size": 128, "num_blocks": [2, 2, 2, 2]},
         {"hidden_size": 256, "num_blocks": [2, 2, 2, 2]},
@@ -152,16 +176,18 @@ def main(n_epochs=200):
         {"hidden_size": 128, "num_blocks": [4, 3, 2, 1]},
         {"hidden_size": 128, "num_blocks": [2, 3, 3, 2]},
     ]
+
     for params in hyperparams:
         hidden_size = params["hidden_size"]
         num_blocks = params["num_blocks"]
 
+        print(f"Running for hyperparameters - Hidden Size: {hidden_size}, Num Blocks: {num_blocks}")
+        model_name = generate_model_name("ResNet", params)
+        save_directory = create_save_directory(model_name)
+
         try:
             model = ResNet(hidden_size, num_blocks, 1).to(device)
-            # if torch.cuda.device_count() > 1:
-            #     print("Using multiple GPUs")
-            #     model = torch.nn.DataParallel(model)
-            optimizer = Adam(model.parameters(), lr=0.0001)
+            optimizer = Adam(model.parameters(), lr=0.00001)
 
             # Loop until the model reaches the desired number of positive predictions
             while True:
@@ -175,36 +201,36 @@ def main(n_epochs=200):
                     # Training the model
                     train_model(train_dl, model, loss_function, optimizer, device)
 
+                    # Printing the epoch number every 50 epochs
+                    if (epoch + 1) % 50 == 0:
+                        print(f"Epoch {epoch + 1}/{n_epochs} completed")
+
                 # Evaluating the model
                 _, _, _, _, _, _, _, true_positive_positions, opened_positions, positive_positions = evaluate_model(
                     test_dl, model, loss_function, next_day_data_path, device)
 
-                # Adjusting the cost value based on the number of positive predictions
-                target_positive_predictions = 25
-                if positive_positions > target_positive_predictions + 2:  # greater than 27
-                    cost += 0.01
-                elif positive_positions < target_positive_predictions - 2:  # less than 23
-                    cost -= 0.01
-                else:
-                    break
+                cost_adjustment = adjust_cost(positive_positions)
+                if cost_adjustment is None:
+                    save_model(model, model_name, params, save_directory)
 
-                cost = max(0.0, min(1.0, cost))
+                    break
+                cost += cost_adjustment
                 print(f"Number of positive predictions: {positive_positions}")
                 print(f"Updated cost value: {cost}")
 
             # Adding final results
             loss, acc, precision, recall, f1, mcc, avg_roi, true_positive_positions, opened_positions, positive_positions = evaluate_model(
                 test_dl, model, loss_function, next_day_data_path, device)
-            result = {"Cost_Matrix_Value": cost, "Accuracy": acc, "Precision": precision, "Recall": recall,
+            result = {"Hidden_Size": hidden_size, "Num_Blocks": '_'.join(map(str, num_blocks)),
+                      "Cost_Matrix_Value": cost, "Accuracy": acc, "Precision": precision, "Recall": recall,
                       "F1-score": f1, "MCC": mcc, "Avg_ROI": avg_roi, "TP_positions": true_positive_positions,
-                      "total_positions": opened_positions, "positive_positions": positive_positions,
-                      "Model": f"ResNet_hs_{hidden_size}_nb_{'_'.join(map(str, num_blocks))}"}
+                      "total_positions": opened_positions, "positive_positions": positive_positions}
             results = pd.concat([results, pd.DataFrame([result])], ignore_index=True)
-            results.to_csv(f"results_hs_{hidden_size}_nb_{'_'.join(map(str, num_blocks))}.csv", index=False)
 
         except KeyboardInterrupt:
             print("\nStopping the code execution...")
-        results.to_csv("results.csv", index=False)
+
+    results.to_csv("finalresults.csv", index=False)
 
 
 if __name__ == "__main__":
