@@ -122,7 +122,7 @@ def main(n_epochs=200):
             gpu_name = torch.cuda.get_device_name(gpu_id)
             print(f"GPU {gpu_id}: {gpu_name}")
 
-        device = torch.device("cuda:0")
+        device = torch.device("cuda:3")
     else:
         print("No GPUs available, using the CPU instead.")
         device = torch.device("cpu")
@@ -158,9 +158,9 @@ def main(n_epochs=200):
 
         try:
             model = ResNet(hidden_size, num_blocks, 1).to(device)
-            if torch.cuda.device_count() > 1:
-                print("Using multiple GPUs")
-                model = torch.nn.DataParallel(model)
+            # if torch.cuda.device_count() > 1:
+            #     print("Using multiple GPUs")
+            #     model = torch.nn.DataParallel(model)
             optimizer = Adam(model.parameters(), lr=0.0001)
 
             # Loop until the model reaches the desired number of positive predictions
@@ -169,9 +169,6 @@ def main(n_epochs=200):
                 loss_function = CostSensitiveLoss(weight=100,
                                                   cost_matrix=np.array([[1 - cost, cost], [cost, 1 - cost]]),
                                                   reduction="mean")
-
-                # In your main function before starting your training loop:
-                early_stopping = EarlyStopping.EarlyStopping(patience=5, verbose=True)
 
                 # Inside your training loop:
                 for epoch in range(n_epochs):
