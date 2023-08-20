@@ -113,6 +113,7 @@ def load_model(model, model_name, epoch, save_directory):
     model.load_state_dict(checkpoint['model_state_dict'])
     return model
 
+
 def generate_model_name(base_name, params):
     """
     Generate a unique model name based on the hyperparameters.
@@ -120,7 +121,8 @@ def generate_model_name(base_name, params):
     params_str = "_".join(f"{k}={v}" for k, v in params.items())
     return f"{base_name}_{params_str}"
 
-def adjust_cost(positive_positions, target=25, delta=2, step=0.01, lower_bound=0.0, upper_bound=1.0):
+
+def adjust_cost(positive_positions, target=25, delta=2, step=0.01):
     """Adjust the cost based on the number of positive predictions."""
 
     # Adjust cost based on target and positive positions
@@ -130,13 +132,12 @@ def adjust_cost(positive_positions, target=25, delta=2, step=0.01, lower_bound=0
         adjustment = -step
     else:
         return None
-
     # Ensure cost stays within bounds and has only two decimal points
-    return round(max(lower_bound, min(upper_bound, adjustment)), 2)
+    return round(adjustment, 2)
 
 
 @print_function_name_decorator
-def main(n_epochs=200):
+def main(n_epochs=20):
     if torch.cuda.is_available():
         num_gpus = torch.cuda.device_count()
         print(f"Number of GPUs Available: {num_gpus}")
@@ -144,7 +145,7 @@ def main(n_epochs=200):
             gpu_name = torch.cuda.get_device_name(gpu_id)
             print(f"GPU {gpu_id}: {gpu_name}")
 
-        device = torch.device("cuda:3")
+        device = torch.device("cuda:0")
     else:
         print("No GPUs available, using the CPU instead.")
         device = torch.device("cpu")
