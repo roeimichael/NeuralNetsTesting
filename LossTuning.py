@@ -42,13 +42,16 @@ def prepare_data(path_train, path_test, train_path, starting_date):
 
 
 def train_model(train_dl, model, criterion, optimizer, device):
+    losses = []  # List to store losses for each epoch
     for i, (inputs, targets) in enumerate(train_dl):
         inputs, targets = inputs.to(device), targets.to(device)
         optimizer.zero_grad()
         yhat = model(inputs)
         loss = criterion(yhat, targets)
+        losses.append(loss.item())  # Storing the loss for this epoch
         loss.backward()
         optimizer.step()
+    return np.mean(losses)  # Returning the average loss for this epoch
 
 
 def evaluate_model(test_dl, model, criterion, next_day_data_path, device):
@@ -137,7 +140,7 @@ def adjust_cost(positive_positions, target=25, delta=2, step=0.01):
 
 
 @print_function_name_decorator
-def main(n_epochs=20):
+def main(n_epochs=200):
     if torch.cuda.is_available():
         num_gpus = torch.cuda.device_count()
         print(f"Number of GPUs Available: {num_gpus}")
@@ -200,13 +203,10 @@ def main(n_epochs=20):
                 # Inside your training loop:
                 for epoch in range(n_epochs):
                     # Training the model
-                    train_model(train_dl, model, loss_function, optimizer, device)
+                    avg_loss = train_model(train_dl, model, loss_function, optimizer,device)
+                    if (epoch + 1) % 10 == 0:
+                        print(f"Epoch {epoch + 1}/{n_epochs} completed with average loss: {avg_loss:.4f}")
 
-                    # Printing the epoch number every 50 epochs
-                    if (epoch + 1) % 50 == 0:
-                        print(f"Epoch {epoch + 1}/{n_epochs} completed")
-
-                # Evaluating the model
                 _, _, _, _, _, _, _, true_positive_positions, opened_positions, positive_positions = evaluate_model(
                     test_dl, model, loss_function, next_day_data_path, device)
 
