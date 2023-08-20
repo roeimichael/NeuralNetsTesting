@@ -14,7 +14,7 @@ from sklearn.metrics import f1_score, matthews_corrcoef
 from tqdm import tqdm
 from sklearn.metrics import precision_score, recall_score
 import torchvision.models as models
-
+import EarlyStopping
 
 def print_function_name_decorator(func):
     @functools.wraps(func)
@@ -142,65 +142,84 @@ def main(n_epochs=50):
 
     results = pd.DataFrame(columns=["Cost_Matrix_Value", "Accuracy", "Precision", "Recall", "F1-score", "MCC",
                                     "Avg_ROI", "TP_positions", "total_positions", "positive_positions"])
+    hyperparams = [
+        {"hidden_size": 128, "num_blocks": [2, 2, 2, 2]},
+        {"hidden_size": 256, "num_blocks": [2, 2, 2, 2]},
+        {"hidden_size": 128, "num_blocks": [3, 3, 3, 3]},
+        {"hidden_size": 64, "num_blocks": [2, 2, 2, 2]},
+        {"hidden_size": 512, "num_blocks": [2, 2, 2, 2]},
+        {"hidden_size": 1024, "num_blocks": [2, 2, 2, 2]},
+        {"hidden_size": 128, "num_blocks": [1, 2, 3, 4]},
+        {"hidden_size": 128, "num_blocks": [4, 3, 2, 1]},
+        {"hidden_size": 128, "num_blocks": [2, 3, 3, 2]},
+    ]
+    for params in hyperparams:
+        hidden_size = params["hidden_size"]
+        num_blocks = params["num_blocks"]
 
-    try:
-        model = ResNet(128, [2, 2, 2, 2], 1).to(device)
-        if torch.cuda.device_count() > 1:
-            print("Using multiple GPUs")
-            model = torch.nn.DataParallel(model)
-        optimizer = Adam(model.parameters(), lr=0.0001)
+        try:
+            model = ResNet(hidden_size, num_blocks, 1).to(device)
+            if torch.cuda.device_count() > 1:
+                print("Using multiple GPUs")
+                model = torch.nn.DataParallel(model)
+            optimizer = Adam(model.parameters(), lr=0.0001)
 
-        # Loop until the model reaches the desired number of positive predictions
-        while True:
-            # Defining the loss function with the current cost value
-            loss_function = CostSensitiveLoss(weight=100,
-                                              cost_matrix=np.array([[1 - cost, cost], [cost, 1 - cost]]),
-                                              reduction="mean")
+            # Loop until the model reaches the desired number of positive predictions
+            while True:
+                # Defining the loss function with the current cost value
+                loss_function = CostSensitiveLoss(weight=100,
+                                                  cost_matrix=np.array([[1 - cost, cost], [cost, 1 - cost]]),
+                                                  reduction="mean")
 
-            # Training the model
-            for epoch in range(n_epochs):
-                if epoch % 10 == 0:
-                    print(f"Epoch: {epoch}")
-                train_model(train_dl, model, loss_function, optimizer, device)
+                # In your main function before starting your training loop:
+                early_stopping = EarlyStopping.EarlyStopping(patience=5, verbose=True)
 
-            # Evaluating the model
-            _, _, _, _, _, _, _, true_positive_positions, opened_positions, positive_positions = evaluate_model(
+                # Inside your training loop:
+                for epoch in range(n_epochs):
+                    # Training the model
+                    train_model(train_dl, model, loss_function, optimizer, device)
+
+                    # Evaluating the model
+                    val_loss, _, _, _, _, _, _, _, _, _ = evaluate_model(test_dl, model, loss_function, next_day_data_path,
+                                                                         device)
+                    print(f'Epoch: {epoch}, Validation Loss: {val_loss:.4f}')
+
+                    early_stopping(val_loss, model)
+
+                    if early_stopping.early_stop:
+                        print("Early stopping")
+                        break
+
+                # Evaluating the model
+                _, _, _, _, _, _, _, true_positive_positions, opened_positions, positive_positions = evaluate_model(
+                    test_dl, model, loss_function, next_day_data_path, device)
+
+                # Adjusting the cost value based on the number of positive predictions
+                target_positive_predictions = 25
+                if positive_positions > target_positive_predictions + 2:  # greater than 27
+                    cost += 0.01
+                elif positive_positions < target_positive_predictions - 2:  # less than 23
+                    cost -= 0.01
+                else:
+                    break
+
+                cost = max(0.0, min(1.0, cost))
+                print(f"Number of positive predictions: {positive_positions}")
+                print(f"Updated cost value: {cost}")
+
+            # Adding final results
+            loss, acc, precision, recall, f1, mcc, avg_roi, true_positive_positions, opened_positions, positive_positions = evaluate_model(
                 test_dl, model, loss_function, next_day_data_path, device)
+            result = {"Cost_Matrix_Value": cost, "Accuracy": acc, "Precision": precision, "Recall": recall,
+                      "F1-score": f1, "MCC": mcc, "Avg_ROI": avg_roi, "TP_positions": true_positive_positions,
+                      "total_positions": opened_positions, "positive_positions": positive_positions,
+                      "Model": f"ResNet_hs_{hidden_size}_nb_{'_'.join(map(str, num_blocks))}"}
+            results = pd.concat([results, pd.DataFrame([result])], ignore_index=True)
+            results.to_csv(f"results_hs_{hidden_size}_nb_{'_'.join(map(str, num_blocks))}.csv", index=False)
 
-            # Adjusting the cost value based on the number of positive predictions
-            target_positive_predictions = 25
-            if positive_positions > target_positive_predictions-3:
-                cost += 0.01
-            elif positive_positions < target_positive_predictions+3:
-                cost -= 0.01
-            else:
-                break
-
-            cost = max(0.0, min(1.0, cost))
-            print(f"Number of positive predictions: {positive_positions}")
-            print(f"Updated cost value: {cost}")
-
-        # Adding final results
-        loss, acc, precision, recall, f1, mcc, avg_roi, true_positive_positions, opened_positions, positive_positions = evaluate_model(
-            test_dl, model, loss_function, next_day_data_path, device)
-        result = {
-            "Cost_Matrix_Value": cost,
-            "Accuracy": acc,
-            "Precision": precision,
-            "Recall": recall,
-            "F1-score": f1,
-            "MCC": mcc,
-            "Avg_ROI": avg_roi,
-            "TP_positions": true_positive_positions,
-            "total_positions": opened_positions,
-            "positive_positions": positive_positions
-        }
-        results = pd.concat([results, pd.DataFrame([result])], ignore_index=True)
+        except KeyboardInterrupt:
+            print("\nStopping the code execution...")
         results.to_csv("results.csv", index=False)
-
-    except KeyboardInterrupt:
-        print("\nStopping the code execution...")
-    results.to_csv("results.csv", index=False)
 
 
 if __name__ == "__main__":
