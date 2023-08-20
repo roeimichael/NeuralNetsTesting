@@ -14,7 +14,6 @@ from sklearn.metrics import f1_score, matthews_corrcoef
 from tqdm import tqdm
 from sklearn.metrics import precision_score, recall_score
 import torchvision.models as models
-import EarlyStopping
 
 def print_function_name_decorator(func):
     @functools.wraps(func)
@@ -115,7 +114,7 @@ def load_model(model, model_name, epoch, save_directory):
 
 
 @print_function_name_decorator
-def main(n_epochs=50):
+def main(n_epochs=200):
     if torch.cuda.is_available():
         num_gpus = torch.cuda.device_count()
         print(f"Number of GPUs Available: {num_gpus}")
@@ -178,17 +177,6 @@ def main(n_epochs=50):
                 for epoch in range(n_epochs):
                     # Training the model
                     train_model(train_dl, model, loss_function, optimizer, device)
-
-                    # Evaluating the model
-                    val_loss, _, _, _, _, _, _, _, _, _ = evaluate_model(test_dl, model, loss_function, next_day_data_path,
-                                                                         device)
-                    print(f'Epoch: {epoch}, Validation Loss: {val_loss:.4f}')
-
-                    early_stopping(val_loss, model)
-
-                    if early_stopping.early_stop:
-                        print("Early stopping")
-                        break
 
                 # Evaluating the model
                 _, _, _, _, _, _, _, true_positive_positions, opened_positions, positive_positions = evaluate_model(
