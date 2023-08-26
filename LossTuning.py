@@ -125,8 +125,13 @@ def generate_model_name(base_name, params):
     return f"{base_name}_{params_str}"
 
 
-def adjust_cost(positive_positions, target=25, delta=2, step=0.01):
+def adjust_cost(positive_positions, iteration, target=15, delta=2, max_step=0.1, min_step=0.01):
     """Adjust the cost based on the number of positive predictions."""
+
+    # Compute the step size based on the iteration number
+    # The step size will decrease linearly from max_step to min_step over the first 10 iterations
+    # and then remain constant at min_step
+    step = max(min_step, max_step - (max_step - min_step) * min(1, iteration / 10))
 
     # Adjust cost based on target and positive positions
     if positive_positions > target + delta:
@@ -163,7 +168,6 @@ def main(n_epochs=200):
     next_day_data_path = f'./data/dates1.5/{dates[starting_date + 2]}.csv'
     train_dl, test_dl = prepare_data(path_train, path_test, train_path, starting_date)
     initial_cost_value = 0.5
-    cost = initial_cost_value
 
     results = pd.DataFrame(
         columns=["Hidden_Size", "Num_Blocks", "Cost_Matrix_Value", "Accuracy", "Precision", "Recall", "F1-score", "MCC",
@@ -184,40 +188,39 @@ def main(n_epochs=200):
     for params in hyperparams:
         hidden_size = params["hidden_size"]
         num_blocks = params["num_blocks"]
-
+        cost = initial_cost_value
         print(f"Running for hyperparameters - Hidden Size: {hidden_size}, Num Blocks: {num_blocks}")
         model_name = generate_model_name("ResNet", params)
         save_directory = create_save_directory(model_name)
-
+        iteration = 1
         try:
-            model = ResNet(hidden_size, num_blocks, 1).to(device)
-            optimizer = Adam(model.parameters(), lr=0.00001)
-
-            # Loop until the model reaches the desired number of positive predictions
             while True:
-                # Defining the loss function with the current cost value
+                model = ResNet(hidden_size, num_blocks, 1).to(device)
+                if torch.cuda.device_count() > 1:
+                    print("using", torch.cuda.device_count(), "GPUs")
+                    model = torch.nn.DataParallel(model)
+                optimizer = Adam(model.parameters(), lr=0.00001)
                 loss_function = CostSensitiveLoss(weight=100,
                                                   cost_matrix=np.array([[1 - cost, cost], [cost, 1 - cost]]),
                                                   reduction="mean")
-
                 # Inside your training loop:
                 for epoch in range(n_epochs):
                     # Training the model
-                    avg_loss = train_model(train_dl, model, loss_function, optimizer,device)
+                    avg_loss = train_model(train_dl, model, loss_function, optimizer, device)
                     if (epoch + 1) % 10 == 0:
                         print(f"Epoch {epoch + 1}/{n_epochs} completed with average loss: {avg_loss:.4f}")
 
                 _, _, _, _, _, _, _, true_positive_positions, opened_positions, positive_positions = evaluate_model(
                     test_dl, model, loss_function, next_day_data_path, device)
 
-                cost_adjustment = adjust_cost(positive_positions)
+                cost_adjustment = adjust_cost(positive_positions, iteration)
                 if cost_adjustment is None:
                     save_model(model, model_name, params, save_directory)
-
                     break
                 cost += cost_adjustment
                 print(f"Number of positive predictions: {positive_positions}")
                 print(f"Updated cost value: {cost}")
+                iteration += 1
 
             # Adding final results
             loss, acc, precision, recall, f1, mcc, avg_roi, true_positive_positions, opened_positions, positive_positions = evaluate_model(
